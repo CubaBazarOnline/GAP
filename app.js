@@ -1,9 +1,9 @@
-// app.js
 document.addEventListener('DOMContentLoaded', () => {
     // DOM Elements
     const elements = {
         generateBtn: document.getElementById('generateBtn'),
         copyBtn: document.getElementById('copyBtn'),
+        clearHistoryBtn: document.getElementById('clearHistoryBtn'),
         adContent: document.getElementById('adContent'),
         resultActions: document.getElementById('resultActions'),
         historyContainer: document.getElementById('historyContainer'),
@@ -18,8 +18,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Event Listeners
     elements.generateBtn.addEventListener('click', generateAd);
     elements.copyBtn.addEventListener('click', copyAdToClipboard);
+    elements.clearHistoryBtn.addEventListener('click', clearHistory);
     elements.nameInput.addEventListener('input', () => validateField(elements.nameInput, 'nameError'));
     elements.phoneInput.addEventListener('input', validatePhone);
+    
+    // Mejorar accesibilidad con eventos de teclado
+    elements.generateBtn.addEventListener('keyup', (e) => e.key === 'Enter' && generateAd());
+    elements.copyBtn.addEventListener('keyup', (e) => e.key === 'Enter' && copyAdToClipboard());
+    elements.clearHistoryBtn.addEventListener('keyup', (e) => e.key === 'Enter' && clearHistory());
 
     // Initialize
     loadHistory();
@@ -46,7 +52,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Ad Generation
     function generateAd() {
-        if (!validateField(elements.nameInput, 'nameError') || !validatePhone()) return;
+        if (!validateField(elements.nameInput, 'nameError') || !validatePhone()) {
+            // Mejor feedback para errores
+            if (!validateField(elements.nameInput, 'nameError')) {
+                elements.nameInput.focus();
+            } else if (!validatePhone()) {
+                elements.phoneInput.focus();
+            }
+            return;
+        }
 
         const adData = {
             name: elements.nameInput.value.trim(),
@@ -150,10 +164,17 @@ ${customMessage ? `\n🌟 ${customMessage}` : ''}`
 
     // UI Functions
     function displayAd(text) {
-        elements.adContent.textContent = text;
+        elements.adContent.innerHTML = ''; // Limpiar contenido previo
+        const pre = document.createElement('pre');
+        pre.textContent = text;
+        elements.adContent.appendChild(pre);
+        
         elements.resultActions.classList.remove('hidden');
         elements.wordCount.textContent = `${countWords(text)} palabras`;
         elements.wordCount.classList.remove('hidden');
+        
+        // Auto-enfocar el botón de copiar para mejor accesibilidad
+        elements.copyBtn.focus();
     }
 
     function countWords(text) {
@@ -164,24 +185,43 @@ ${customMessage ? `\n🌟 ${customMessage}` : ''}`
         try {
             await navigator.clipboard.writeText(elements.adContent.textContent);
             elements.copyBtn.textContent = '¡Copiado!';
-            setTimeout(() => { elements.copyBtn.textContent = 'Copiar Anuncio'; }, 2000);
+            elements.copyBtn.setAttribute('aria-label', 'Anuncio copiado al portapapeles');
+            setTimeout(() => { 
+                elements.copyBtn.textContent = 'Copiar Anuncio';
+                elements.copyBtn.setAttribute('aria-label', 'Copiar anuncio al portapapeles');
+            }, 2000);
         } catch (err) {
             console.error('Error al copiar:', err);
+            elements.copyBtn.textContent = 'Error al copiar';
+            setTimeout(() => { elements.copyBtn.textContent = 'Copiar Anuncio'; }, 2000);
         }
     }
 
     // History Functions
     function saveToHistory(adText) {
         const history = JSON.parse(localStorage.getItem('adHistory') || '[]');
+        
+        // Evitar duplicados consecutivos
+        if (history.length > 0 && history[0].text === adText) {
+            return;
+        }
+        
         if (history.length >= 5) history.pop();
-        history.unshift({ text: adText, date: new Date().toLocaleString() });
+        history.unshift({ 
+            text: adText, 
+            date: new Date().toLocaleString(),
+            id: Date.now() // ID único para cada item
+        });
         localStorage.setItem('adHistory', JSON.stringify(history));
         loadHistory();
     }
 
     function loadHistory() {
         const history = JSON.parse(localStorage.getItem('adHistory') || '[]');
-        if (history.length === 0) return;
+        if (history.length === 0) {
+            elements.historyContainer.classList.add('hidden');
+            return;
+        }
 
         elements.historyContainer.classList.remove('hidden');
         elements.historyList.innerHTML = '';
@@ -189,10 +229,91 @@ ${customMessage ? `\n🌟 ${customMessage}` : ''}`
         history.forEach(item => {
             const historyItem = document.createElement('div');
             historyItem.className = 'history-item';
-            historyItem.innerHTML = `<small>${item.date}</small><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.text.split('\n')[0]}</div>`;
+            historyItem.tabIndex = 0;
+            historyItem.setAttribute('role', 'button');
+            historyItem.setAttribute('aria-label', `Anuncio generado el ${item.date}`);
+            historyItem.dataset.id = item.id;
             
+            const dateSpan = document.createElement('small');
+            dateSpan.textContent = item.date;
+            
+            const contentPreview = document.createElement('div');
+            contentPreview.style.whiteSpace = 'nowrap';
+            contentPreview.style.overflow = 'hidden';
+            contentPreview.style.textOverflow = 'ellipsis';
+            contentPreview.textContent = item.text.split('\n')[0];
+            
+            // Botón de editar
+            const editBtn = document.createElement('button');
+            editBtn.textContent = 'Editar';
+            editBtn.className = 'edit-btn';
+            editBtn.style.marginLeft = 'auto';
+            editBtn.style.fontSize = '12px';
+            editBtn.style.padding = '4px 8px';
+            editBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                editHistoryItem(item);
+            });
+            
+            const container = document.createElement('div');
+            container.style.display = 'flex';
+            container.style.alignItems = 'center';
+            container.style.gap = '8px';
+            container.appendChild(dateSpan);
+            container.appendChild(contentPreview);
+            container.appendChild(editBtn);
+            
+            historyItem.appendChild(container);
             historyItem.addEventListener('click', () => displayAd(item.text));
+            historyItem.addEventListener('keyup', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    displayAd(item.text);
+                }
+            });
+            
             elements.historyList.appendChild(historyItem);
         });
+    }
+
+    function clearHistory() {
+        if (confirm('¿Estás seguro de que quieres borrar todo el historial?')) {
+            localStorage.removeItem('adHistory');
+            elements.historyContainer.classList.add('hidden');
+        }
+    }
+
+    function editHistoryItem(item) {
+        // Extraer datos del anuncio para edición
+        const lines = item.text.split('\n');
+        const nameMatch = lines.find(line => line.includes('Contacta a') || line.includes('CONTACTO:') || line.includes('Contáctanos hoy'))?.match(/Contacta a (.+?) hoy|CONTACTO:\s*(.+?)\s*$|Contáctanos hoy/);
+        const phoneMatch = lines.find(line => line.includes('📞') || line.includes('✆'))?.match(/📞 (.+?)\s*$|✆ (.+?)\s*$/);
+        
+        // Llenar el formulario con los datos del historial
+        if (nameMatch) {
+            elements.nameInput.value = (nameMatch[1] || nameMatch[2] || '').replace(/[A-Z]/g, '').trim();
+        }
+        
+        if (phoneMatch) {
+            const phone = (phoneMatch[1] || phoneMatch[2] || '').replace('+53', '').trim();
+            elements.phoneInput.value = phone;
+        }
+        
+        // Detectar oferta especial
+        const offerLine = lines.find(line => line.includes('OFERTA') || '');
+        if (offerLine) {
+            const offerMatch = offerLine.match(/OFERTA[^\w]*(.+?)[^\w]*$/);
+            if (offerMatch) {
+                elements.specialOffer.value = offerMatch[1].replace(/[^\w\s%]/g, '').trim();
+            }
+        }
+        
+        // Detectar mensaje personalizado
+        const customMsgLine = lines.find(line => line.includes('NOTA:') || line.includes('💡') || line.includes('ℹ') || line.includes('🌟'));
+        if (customMsgLine) {
+            elements.customMessage.value = customMsgLine.split(':').slice(1).join(':').trim();
+        }
+        
+        // Enfocar el primer campo para edición
+        elements.nameInput.focus();
     }
 });
